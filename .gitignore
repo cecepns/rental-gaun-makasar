@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+.cache/
+*.log
+.env
+.env.local
+.DS_Store
+.idea/
+.vscode/
+uploads-rental-system/*
+!uploads-rental-system/.gitkeep
+backend/uploads-rental-system/*
+!backend/uploads-rental-system/.gitkeep
