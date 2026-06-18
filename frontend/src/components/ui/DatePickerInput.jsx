@@ -12,12 +12,27 @@ const parseDate = (value) => {
   return new Date(year, month - 1, day);
 };
 
+const getToday = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+};
+
+const resolveMinDate = (minDate, disablePast) => {
+  const candidates = [];
+  if (disablePast) candidates.push(getToday());
+  if (minDate) candidates.push(parseDate(minDate));
+  if (!candidates.length) return undefined;
+  return candidates.reduce((latest, date) => (date > latest ? date : latest));
+};
+
 export default function DatePickerInput({
   label,
   value,
   onChange,
   required = false,
   minDate,
+  disablePast = false,
   placeholder = 'Pilih tanggal',
 }) {
   return (
@@ -30,7 +45,7 @@ export default function DatePickerInput({
           dateFormat="dd MMM yyyy"
           locale="id"
           placeholderText={placeholder}
-          minDate={minDate ? parseDate(minDate) : undefined}
+          minDate={resolveMinDate(minDate, disablePast)}
           required={required}
           className="input w-full pr-10"
           wrapperClassName="w-full"

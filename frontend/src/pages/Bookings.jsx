@@ -235,12 +235,14 @@ export default function Bookings() {
               label="Tanggal Acara"
               value={form.event_date}
               onChange={(event_date) => setForm({ ...form, event_date })}
+              disablePast
               required
             />
             <DatePickerInput
               label="Tanggal Ambil"
               value={form.pickup_date}
               onChange={(pickup_date) => setForm({ ...form, pickup_date, return_date: form.return_date && form.return_date < pickup_date ? pickup_date : form.return_date })}
+              disablePast
               required
             />
             <DatePickerInput
@@ -248,6 +250,7 @@ export default function Bookings() {
               value={form.return_date}
               onChange={(return_date) => setForm({ ...form, return_date })}
               minDate={form.pickup_date}
+              disablePast
               required
             />
             <div>
