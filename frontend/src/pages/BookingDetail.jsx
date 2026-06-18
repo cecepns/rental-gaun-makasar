@@ -132,7 +132,7 @@ export default function BookingDetail() {
             <div className="space-y-2 text-sm">
               <div className="flex justify-between"><span>Total Tagihan</span><span className="font-medium">{formatCurrency(booking.total)}</span></div>
               <div className="flex justify-between"><span>Total Dibayar</span><span className="font-medium text-green-600">{formatCurrency(summary.totalPaid)}</span></div>
-              <div className="flex justify-between border-t pt-2"><span>Sisa Tagihan</span><span className="font-bold text-red-600">{formatCurrency(summary.remaining)}</span></div>
+              <div className="flex justify-between border-t pt-2"><span>Sisa Tagihan</span><span className="font-bold text-red-600">{formatCurrency(summary.remaining ?? booking.total)}</span></div>
             </div>
           </div>
 

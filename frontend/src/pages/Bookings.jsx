@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Plus, Eye, XCircle } from 'lucide-react';
+import { Plus, Eye, XCircle, Pencil, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import AdminLayout from '@/components/layout/AdminLayout';
 import SearchInput from '@/components/ui/SearchInput';
@@ -13,7 +13,7 @@ import ProductSelect, { formatProductOption } from '@/components/ui/ProductSelec
 import CustomerSelect from '@/components/ui/CustomerSelect';
 import DatePickerInput from '@/components/ui/DatePickerInput';
 import { useDebounce } from '@/hooks/useDebounce';
-import { get, post, put } from '@/utils/request';
+import { get, post, put, del } from '@/utils/request';
 import { API_ENDPOINTS } from '@/utils/endpoints';
 import { formatCurrency, formatDate, BOOKING_STATUS, getErrorMessage, getAssetUrl } from '@/utils/helpers';
 
@@ -29,6 +29,8 @@ const emptyForm = {
   quantity: 1,
 };
 
+const toDateValue = (value) => (value ? String(value).split('T')[0] : '');
+
 export default function Bookings() {
   const location = useLocation();
   const [items, setItems] = useState([]);
@@ -39,6 +41,8 @@ export default function Bookings() {
   const [limit, setLimit] = useState(10);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const [loadingEdit, setLoadingEdit] = useState(false);
   const [saving, setSaving] = useState(false);
   const [availability, setAvailability] = useState(null);
   const [form, setForm] = useState(emptyForm);
@@ -59,6 +63,7 @@ export default function Bookings() {
 
   const resetForm = () => {
     setForm(emptyForm);
+    setEditItem(null);
     setSelectedProduct(null);
     setSelectedProductOption(null);
     setSelectedCustomerOption(null);
@@ -84,10 +89,50 @@ export default function Bookings() {
     setForm((f) => ({ ...f, product_id: String(res.data.id) }));
   };
 
+  const openEditModal = async (item) => {
+    setLoadingEdit(true);
+    setModalOpen(true);
+    try {
+      const res = await get(API_ENDPOINTS.BOOKINGS.DETAIL(item.id));
+      if (!res.success) {
+        toast.error('Gagal memuat data booking');
+        setModalOpen(false);
+        return;
+      }
+      const booking = res.data;
+      const firstItem = booking.items?.[0];
+      setEditItem(booking);
+      setForm({
+        customer_id: String(booking.customer_id),
+        product_id: firstItem ? String(firstItem.product_id) : '',
+        event_date: toDateValue(booking.event_date),
+        pickup_date: toDateValue(booking.pickup_date),
+        return_date: toDateValue(booking.return_date),
+        deposit: booking.deposit ?? '',
+        dp_amount: booking.dp_amount ?? '',
+        notes: booking.notes || '',
+        quantity: firstItem?.quantity || 1,
+      });
+      setSelectedCustomerOption({
+        value: booking.customer_id,
+        label: `${booking.customer_name} - ${booking.customer_phone}`,
+        customer: { id: booking.customer_id, name: booking.customer_name, phone: booking.customer_phone },
+      });
+      if (firstItem?.product_id) {
+        await loadProductById(firstItem.product_id);
+      }
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+      setModalOpen(false);
+    } finally {
+      setLoadingEdit(false);
+    }
+  };
+
   useEffect(() => {
-    if (!location.state?.productId) return;
+    if (!location.state?.productId || editItem) return;
     loadProductById(location.state.productId).then(() => setModalOpen(true));
-  }, [location.state]);
+  }, [location.state, editItem]);
 
   const handleProductChange = (option) => {
     setSelectedProductOption(option);
@@ -103,6 +148,7 @@ export default function Bookings() {
         product_id: form.product_id,
         pickup_date: form.pickup_date,
         return_date: form.return_date,
+        exclude_booking_id: editItem?.id || undefined,
       });
       if (res.success) setAvailability(res.data);
     } catch (e) { toast.error(getErrorMessage(e)); }
@@ -110,7 +156,7 @@ export default function Bookings() {
 
   useEffect(() => {
     if (form.product_id && form.pickup_date && form.return_date) checkAvailability();
-  }, [form.product_id, form.pickup_date, form.return_date]);
+  }, [form.product_id, form.pickup_date, form.return_date, editItem?.id]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -127,18 +173,24 @@ export default function Bookings() {
       return;
     }
     setSaving(true);
+    const payload = {
+      customer_id: form.customer_id,
+      event_date: form.event_date,
+      pickup_date: form.pickup_date,
+      return_date: form.return_date,
+      deposit: form.deposit || selectedProduct?.deposit || 0,
+      dp_amount: form.dp_amount || 0,
+      notes: form.notes,
+      items: [{ product_id: Number(form.product_id), quantity: Number(form.quantity) || 1 }],
+    };
     try {
-      await post(API_ENDPOINTS.BOOKINGS.LIST, {
-        customer_id: form.customer_id,
-        event_date: form.event_date,
-        pickup_date: form.pickup_date,
-        return_date: form.return_date,
-        deposit: form.deposit || selectedProduct?.deposit || 0,
-        dp_amount: form.dp_amount || 0,
-        notes: form.notes,
-        items: [{ product_id: Number(form.product_id), quantity: Number(form.quantity) || 1 }],
-      });
-      toast.success('Booking berhasil dibuat');
+      if (editItem) {
+        await put(API_ENDPOINTS.BOOKINGS.DETAIL(editItem.id), payload);
+        toast.success('Booking berhasil diperbarui');
+      } else {
+        await post(API_ENDPOINTS.BOOKINGS.LIST, payload);
+        toast.success('Booking berhasil dibuat');
+      }
       closeModal();
       fetchData();
     } catch (err) { toast.error(getErrorMessage(err)); }
@@ -161,6 +213,29 @@ export default function Bookings() {
       </div>
     ), { duration: 10000 });
   };
+
+  const handleDelete = (item) => {
+    toast((t) => (
+      <div>
+        <p className="font-medium">Hapus booking {item.booking_number}?</p>
+        <p className="mt-1 text-xs text-slate-500">Data booking akan dihapus permanen.</p>
+        <div className="mt-2 flex gap-2">
+          <button className="btn-danger text-xs px-3 py-1" onClick={async () => {
+            try {
+              await del(API_ENDPOINTS.BOOKINGS.DETAIL(item.id));
+              toast.success('Booking dihapus');
+              fetchData();
+            } catch (e) { toast.error(getErrorMessage(e)); }
+            toast.dismiss(t.id);
+          }}>Hapus</button>
+          <button className="btn-secondary text-xs px-3 py-1" onClick={() => toast.dismiss(t.id)}>Batal</button>
+        </div>
+      </div>
+    ), { duration: 10000 });
+  };
+
+  const canEdit = (item) => !['BATAL', 'SELESAI', 'SEDANG_DISEWA'].includes(item.status);
+  const canDelete = (item) => item.status !== 'SEDANG_DISEWA';
 
   return (
     <AdminLayout title="Booking">
@@ -203,9 +278,15 @@ export default function Bookings() {
                     <td className="px-4 py-3"><Badge status={item.status} map={BOOKING_STATUS} /></td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">
-                        <Link to={`/bookings/${item.id}`} className="rounded p-1.5 hover:bg-slate-100"><Eye className="h-4 w-4" /></Link>
-                        {item.status !== 'BATAL' && item.status !== 'SELESAI' && (
-                          <button onClick={() => handleCancel(item)} className="rounded p-1.5 hover:bg-red-50 text-red-500"><XCircle className="h-4 w-4" /></button>
+                        <Link to={`/bookings/${item.id}`} className="rounded p-1.5 hover:bg-slate-100" title="Detail"><Eye className="h-4 w-4" /></Link>
+                        {canEdit(item) && (
+                          <>
+                            <button onClick={() => openEditModal(item)} className="rounded p-1.5 hover:bg-slate-100" title="Edit"><Pencil className="h-4 w-4" /></button>
+                            <button onClick={() => handleCancel(item)} className="rounded p-1.5 hover:bg-orange-50 text-orange-500" title="Batalkan"><XCircle className="h-4 w-4" /></button>
+                          </>
+                        )}
+                        {canDelete(item) && (
+                          <button onClick={() => handleDelete(item)} className="rounded p-1.5 hover:bg-red-50 text-red-500" title="Hapus"><Trash2 className="h-4 w-4" /></button>
                         )}
                       </div>
                     </td>
@@ -220,94 +301,106 @@ export default function Bookings() {
         </div>
       )}
 
-      <Modal open={modalOpen} onClose={closeModal} title="Buat Booking" size="lg">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="label">Customer</label>
-              <CustomerSelect
-                value={selectedCustomerOption}
-                onChange={(option) => {
-                  setSelectedCustomerOption(option);
-                  setForm({ ...form, customer_id: option ? String(option.value) : '' });
-                }}
-              />
-            </div>
-            <div>
-              <label className="label">Barang</label>
-              <ProductSelect value={selectedProductOption} onChange={handleProductChange} />
-            </div>
-            <DatePickerInput
-              label="Tanggal Ambil"
-              value={form.pickup_date}
-              onChange={(pickup_date) => setForm({ ...form, pickup_date, return_date: form.return_date && form.return_date < pickup_date ? pickup_date : form.return_date })}
-              disablePast
-              required
-            />
-            <DatePickerInput
-              label="Tanggal Acara"
-              value={form.event_date}
-              onChange={(event_date) => setForm({ ...form, event_date })}
-              disablePast
-              required
-            />
-            <DatePickerInput
-              label="Tanggal Kembali"
-              value={form.return_date}
-              onChange={(return_date) => setForm({ ...form, return_date })}
-              minDate={form.pickup_date}
-              disablePast
-              required
-            />
-            <div>
-              <label className="label">DP</label>
-              <input type="number" className="input" value={form.dp_amount} onChange={(e) => setForm({ ...form, dp_amount: e.target.value })} />
-            </div>
-          </div>
-
-          {selectedProduct && (
-            <div className="flex gap-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              {selectedProduct.main_image ? (
-                <img
-                  src={getAssetUrl(selectedProduct.main_image)}
-                  alt={selectedProduct.name}
-                  className="h-20 w-20 shrink-0 rounded-lg object-cover"
+      <Modal open={modalOpen} onClose={closeModal} title={editItem ? 'Edit Booking' : 'Buat Booking'} size="lg">
+        {loadingEdit ? (
+          <LoadingSpinner className="py-12" />
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="label">Customer</label>
+                <CustomerSelect
+                  value={selectedCustomerOption}
+                  onChange={(option) => {
+                    setSelectedCustomerOption(option);
+                    setForm({ ...form, customer_id: option ? String(option.value) : '' });
+                  }}
                 />
-              ) : (
-                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-xs text-slate-500">
-                  No image
-                </div>
-              )}
-              <div className="min-w-0 text-sm">
-                <p className="font-semibold text-slate-800">{selectedProduct.name}</p>
-                <p className="text-slate-500">{selectedProduct.code}</p>
-                <p className="mt-1">Harga: {formatCurrency(selectedProduct.rent_price)} | Deposit: {formatCurrency(selectedProduct.deposit)}</p>
-                <p className="font-semibold text-primary-700">
-                  Estimasi Total: {formatCurrency(Number(selectedProduct.rent_price) + Number(form.deposit || selectedProduct.deposit))}
-                </p>
+              </div>
+              <div>
+                <label className="label">Barang</label>
+                <ProductSelect value={selectedProductOption} onChange={handleProductChange} />
+              </div>
+              <DatePickerInput
+                label="Tanggal Ambil"
+                value={form.pickup_date}
+                onChange={(pickup_date) => setForm({ ...form, pickup_date, return_date: form.return_date && form.return_date < pickup_date ? pickup_date : form.return_date })}
+                disablePast={!editItem}
+                required
+              />
+              <DatePickerInput
+                label="Tanggal Acara"
+                value={form.event_date}
+                onChange={(event_date) => setForm({ ...form, event_date })}
+                disablePast={!editItem}
+                required
+              />
+              <DatePickerInput
+                label="Tanggal Kembali"
+                value={form.return_date}
+                onChange={(return_date) => setForm({ ...form, return_date })}
+                minDate={form.pickup_date}
+                disablePast={!editItem}
+                required
+              />
+              <div>
+                <label className="label">DP</label>
+                <input
+                  type="number"
+                  className="input"
+                  value={form.dp_amount}
+                  onChange={(e) => setForm({ ...form, dp_amount: e.target.value })}
+                  disabled={!!editItem}
+                  title={editItem ? 'DP diubah melalui menu Tambah Pembayaran di detail booking' : ''}
+                />
+                {editItem && <p className="mt-1 text-xs text-slate-400">Ubah DP via Tambah Pembayaran di detail booking</p>}
               </div>
             </div>
-          )}
 
-          {availability && (
-            <div className={`rounded-lg p-3 text-sm ${availability.available ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-              {availability.available
-                ? `✓ Tersedia (sisa ${availability.remaining} unit)`
-                : '✗ Gaun itu sudah terbooking. Silakan ubah tanggal atau kode gaun.'}
+            {selectedProduct && (
+              <div className="flex gap-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                {selectedProduct.main_image ? (
+                  <img
+                    src={getAssetUrl(selectedProduct.main_image)}
+                    alt={selectedProduct.name}
+                    className="h-20 w-20 shrink-0 rounded-lg object-cover"
+                  />
+                ) : (
+                  <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-xs text-slate-500">
+                    No image
+                  </div>
+                )}
+                <div className="min-w-0 text-sm">
+                  <p className="font-semibold text-slate-800">{selectedProduct.name}</p>
+                  <p className="text-slate-500">{selectedProduct.code}</p>
+                  <p className="mt-1">Harga: {formatCurrency(selectedProduct.rent_price)} | Deposit: {formatCurrency(selectedProduct.deposit)}</p>
+                  <p className="font-semibold text-primary-700">
+                    Estimasi Total: {formatCurrency(Number(selectedProduct.rent_price) + Number(form.deposit || selectedProduct.deposit))}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {availability && (
+              <div className={`rounded-lg p-3 text-sm ${availability.available ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                {availability.available
+                  ? `✓ Tersedia (sisa ${availability.remaining} unit)`
+                  : '✗ Gaun itu sudah terbooking. Silakan ubah tanggal atau kode gaun.'}
+              </div>
+            )}
+
+            <div>
+              <label className="label">Catatan</label>
+              <textarea className="input" rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
             </div>
-          )}
-
-          <div>
-            <label className="label">Catatan</label>
-            <textarea className="input" rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-          </div>
-          <div className="flex justify-end gap-2">
-            <button type="button" onClick={closeModal} className="btn-secondary">Batal</button>
-            <button type="submit" disabled={saving || !form.product_id || (availability && !availability.available)} className="btn-primary">
-              {saving ? 'Menyimpan...' : 'Simpan Booking'}
-            </button>
-          </div>
-        </form>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={closeModal} className="btn-secondary">Batal</button>
+              <button type="submit" disabled={saving || !form.product_id || (availability && !availability.available)} className="btn-primary">
+                {saving ? 'Menyimpan...' : editItem ? 'Perbarui Booking' : 'Simpan Booking'}
+              </button>
+            </div>
+          </form>
+        )}
       </Modal>
     </AdminLayout>
   );

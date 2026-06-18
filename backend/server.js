@@ -63,14 +63,30 @@ const paginationMeta = (page, limit, total) => ({
 
 const toDateStr = (d) => {
   if (!d) return null;
+  if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
   const date = new Date(d);
-  return date.toISOString().split('T')[0];
+  if (Number.isNaN(date.getTime())) return null;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const parseLocalDate = (value) => {
+  if (!value) return null;
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 };
 
 const eachDay = (start, end) => {
   const days = [];
-  const cur = new Date(start);
-  const last = new Date(end);
+  const cur = parseLocalDate(start);
+  const last = parseLocalDate(end);
+  if (!cur || !last) return days;
   while (cur <= last) {
     days.push(toDateStr(cur));
     cur.setDate(cur.getDate() + 1);
@@ -166,10 +182,10 @@ const expireKeeps = async () => {
   }
 };
 
-const insertBookingDates = async (bookingId, pickupDate, returnDate) => {
+const insertBookingDates = async (bookingId, pickupDate, returnDate, executor = pool) => {
   const days = eachDay(pickupDate, returnDate);
   for (const date of days) {
-    await pool.execute('INSERT INTO booking_dates (booking_id, date) VALUES (?,?)', [bookingId, date]);
+    await executor.execute('INSERT INTO booking_dates (booking_id, date) VALUES (?,?)', [bookingId, date]);
   }
 };
 
@@ -178,7 +194,11 @@ const updateBookingPaymentStatus = async (bookingId) => {
   const [[{ paid }]] = await pool.execute(
     'SELECT COALESCE(SUM(amount),0) as paid FROM payments WHERE booking_id = ?', [bookingId]
   );
-  const totalPaid = Number(paid);
+  let totalPaid = Number(paid);
+  // Backward compat: DP dicatat di dp_amount saat booking dibuat (sebelum auto-insert payment)
+  if (totalPaid === 0 && Number(booking.dp_amount) > 0) {
+    totalPaid = Number(booking.dp_amount);
+  }
   const total = Number(booking.total);
   let paymentStatus = 'BELUM_BAYAR';
   let status = null;
@@ -186,7 +206,7 @@ const updateBookingPaymentStatus = async (bookingId) => {
   else if (totalPaid > 0) { paymentStatus = 'DP'; status = 'DP'; }
   await pool.execute('UPDATE bookings SET payment_status = ? WHERE id = ?', [paymentStatus, bookingId]);
   if (status) await pool.execute('UPDATE bookings SET status = ? WHERE id = ? AND status IN ("KEEP","DP")', [status, bookingId]);
-  return { totalPaid, remaining: total - totalPaid, paymentStatus };
+  return { totalPaid, remaining: Math.max(0, total - totalPaid), paymentStatus };
 };
 
 // ===================== MULTER =====================
@@ -210,8 +230,8 @@ const upload = multer({
 });
 
 // ===================== MIDDLEWARE =====================
-app.use(cors());
-app.use(express.json());
+// app.use(cors());
+// app.use(express.json());
 app.use('/uploads', express.static(UPLOAD_DIR));
 
 // ===================== AUTH =====================
@@ -563,9 +583,9 @@ app.delete('/api/customers/:id', authMiddleware, async (req, res) => {
 // ===================== AVAILABILITY CHECK =====================
 app.post('/api/availability/check', authMiddleware, async (req, res) => {
   try {
-    const { product_id, pickup_date, return_date } = req.body;
+    const { product_id, pickup_date, return_date, exclude_booking_id } = req.body;
     if (!product_id || !pickup_date || !return_date) return fail(res, 'Barang dan tanggal wajib diisi');
-    const result = await checkProductAvailability(product_id, pickup_date, return_date);
+    const result = await checkProductAvailability(product_id, pickup_date, return_date, exclude_booking_id || null);
     const [[product]] = await pool.execute('SELECT name, code FROM products WHERE id = ?', [product_id]);
     let status = 'TERSEDIA';
     if (!result.available) {
@@ -618,8 +638,21 @@ app.get('/api/bookings/:id', authMiddleware, async (req, res) => {
        WHERE py.booking_id = ? ORDER BY py.paid_at DESC`, [req.params.id]
     );
     const [returns] = await pool.execute('SELECT * FROM returns WHERE booking_id = ?', [req.params.id]);
+    const [[{ paymentCount }]] = await pool.execute(
+      'SELECT COUNT(*) as paymentCount FROM payments WHERE booking_id = ?', [req.params.id]
+    );
+    if (Number(paymentCount) === 0 && Number(booking.dp_amount) > 0) {
+      await pool.execute(
+        'INSERT INTO payments (booking_id, amount, method, notes, paid_at, admin_id) VALUES (?,?,?,?,?,?)',
+        [req.params.id, booking.dp_amount, 'CASH', 'DP saat booking', booking.created_at || new Date(), req.user.id]
+      );
+    }
     const paymentSummary = await updateBookingPaymentStatus(req.params.id);
-    ok(res, { ...booking, items, payments, returns, paymentSummary });
+    const [paymentsAfterSync] = await pool.execute(
+      `SELECT py.*, u.name as admin_name FROM payments py JOIN users u ON u.id = py.admin_id
+       WHERE py.booking_id = ? ORDER BY py.paid_at DESC`, [req.params.id]
+    );
+    ok(res, { ...booking, items, payments: paymentsAfterSync, returns, paymentSummary });
   } catch (e) { fail(res, e.message, 500); }
 });
 
@@ -641,6 +674,10 @@ app.post('/api/bookings', authMiddleware, async (req, res) => {
     let rentTotal = 0;
     for (const item of items) {
       const [[p]] = await conn.execute('SELECT rent_price FROM products WHERE id = ?', [item.product_id]);
+      if (!p) {
+        await conn.rollback();
+        return fail(res, 'Barang tidak ditemukan');
+      }
       rentTotal += Number(p.rent_price) * (item.quantity || 1);
     }
     const total = rentTotal + Number(deposit || 0);
@@ -651,18 +688,29 @@ app.post('/api/bookings', authMiddleware, async (req, res) => {
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       [bookingNumber, customer_id, event_date, pickup_date, return_date,
         rentTotal, deposit || 0, dp_amount || 0, total, notes || null,
-        status || 'KEEP', dp_amount > 0 ? 'DP' : 'BELUM_BAYAR']
+        status || 'KEEP', Number(dp_amount) > 0 ? 'DP' : 'BELUM_BAYAR']
     );
     const bookingId = r.insertId;
     for (const item of items) {
       const [[p]] = await conn.execute('SELECT rent_price FROM products WHERE id = ?', [item.product_id]);
+      if (!p) {
+        await conn.rollback();
+        return fail(res, 'Barang tidak ditemukan');
+      }
       await conn.execute(
         'INSERT INTO booking_items (booking_id, product_id, quantity, rent_price) VALUES (?,?,?,?)',
         [bookingId, item.product_id, item.quantity || 1, p.rent_price]
       );
     }
-    await insertBookingDates(bookingId, pickup_date, return_date);
+    await insertBookingDates(bookingId, pickup_date, return_date, conn);
     await conn.commit();
+    if (Number(dp_amount) > 0) {
+      await pool.execute(
+        'INSERT INTO payments (booking_id, amount, method, notes, paid_at, admin_id) VALUES (?,?,?,?,?,?)',
+        [bookingId, dp_amount, 'CASH', 'DP saat booking', new Date(), req.user.id]
+      );
+      await updateBookingPaymentStatus(bookingId);
+    }
     await logActivity(req.user.id, 'CREATE', 'booking', bookingId);
     await createNotification('BOOKING_BARU', 'Booking Baru', `Booking ${bookingNumber} dibuat`, { bookingId });
     ok(res, { id: bookingId, booking_number: bookingNumber });
@@ -676,41 +724,80 @@ app.put('/api/bookings/:id', authMiddleware, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const { event_date, pickup_date, return_date, items, deposit, dp_amount, notes, status } = req.body;
+    const { customer_id, event_date, pickup_date, return_date, items, deposit, dp_amount, notes, status } = req.body;
     const bookingId = req.params.id;
+    const [[existing]] = await conn.execute('SELECT * FROM bookings WHERE id = ?', [bookingId]);
+    if (!existing) {
+      await conn.rollback();
+      return fail(res, 'Booking tidak ditemukan', 404);
+    }
     if (items?.length) {
       for (const item of items) {
         const avail = await checkProductAvailability(item.product_id, pickup_date, return_date, bookingId);
         if (!avail.available) { await conn.rollback(); return fail(res, avail.reason); }
       }
     }
-    let rentTotal = 0;
+    let rentTotal = Number(existing.rent_price);
     if (items?.length) {
       await conn.execute('DELETE FROM booking_items WHERE booking_id = ?', [bookingId]);
       await conn.execute('DELETE FROM booking_dates WHERE booking_id = ?', [bookingId]);
+      rentTotal = 0;
       for (const item of items) {
         const [[p]] = await conn.execute('SELECT rent_price FROM products WHERE id = ?', [item.product_id]);
+        if (!p) {
+          await conn.rollback();
+          return fail(res, 'Barang tidak ditemukan');
+        }
         rentTotal += Number(p.rent_price) * (item.quantity || 1);
         await conn.execute(
           'INSERT INTO booking_items (booking_id, product_id, quantity, rent_price) VALUES (?,?,?,?)',
           [bookingId, item.product_id, item.quantity || 1, p.rent_price]
         );
       }
-      await insertBookingDates(bookingId, pickup_date, return_date);
+      await insertBookingDates(bookingId, pickup_date, return_date, conn);
+    } else if (pickup_date && return_date) {
+      await conn.execute('DELETE FROM booking_dates WHERE booking_id = ?', [bookingId]);
+      await insertBookingDates(bookingId, pickup_date, return_date, conn);
     }
-    const total = rentTotal + Number(deposit || 0);
+    const total = rentTotal + Number(deposit ?? existing.deposit ?? 0);
     await conn.execute(
-      `UPDATE bookings SET event_date=?, pickup_date=?, return_date=?, rent_price=?, deposit=?,
+      `UPDATE bookings SET customer_id=?, event_date=?, pickup_date=?, return_date=?, rent_price=?, deposit=?,
        dp_amount=?, total=?, notes=?, status=? WHERE id=?`,
-      [event_date, pickup_date, return_date, rentTotal, deposit || 0, dp_amount || 0, total, notes, status, bookingId]
+      [
+        customer_id ?? existing.customer_id,
+        event_date ?? existing.event_date,
+        pickup_date ?? existing.pickup_date,
+        return_date ?? existing.return_date,
+        rentTotal,
+        deposit ?? existing.deposit ?? 0,
+        dp_amount ?? existing.dp_amount ?? 0,
+        total,
+        notes ?? existing.notes,
+        status ?? existing.status,
+        bookingId,
+      ]
     );
     await conn.commit();
+    await updateBookingPaymentStatus(bookingId);
     await logActivity(req.user.id, 'UPDATE', 'booking', bookingId);
     ok(res, { id: Number(bookingId) });
   } catch (e) {
     await conn.rollback();
     fail(res, e.message, 500);
   } finally { conn.release(); }
+});
+
+app.delete('/api/bookings/:id', authMiddleware, async (req, res) => {
+  try {
+    const [[booking]] = await pool.execute('SELECT id, status, booking_number FROM bookings WHERE id = ?', [req.params.id]);
+    if (!booking) return fail(res, 'Booking tidak ditemukan', 404);
+    if (booking.status === 'SEDANG_DISEWA') {
+      return fail(res, 'Tidak dapat menghapus booking yang sedang disewa');
+    }
+    await pool.execute('DELETE FROM bookings WHERE id = ?', [req.params.id]);
+    await logActivity(req.user.id, 'DELETE', 'booking', req.params.id, { booking_number: booking.booking_number });
+    ok(res, { deleted: true });
+  } catch (e) { fail(res, e.message, 500); }
 });
 
 app.put('/api/bookings/:id/cancel', authMiddleware, async (req, res) => {
