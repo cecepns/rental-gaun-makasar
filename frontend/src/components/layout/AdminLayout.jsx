@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Package, Users, CalendarDays, Bookmark, CreditCard,
+  LayoutDashboard, Package, Users, CalendarDays, CreditCard,
   BarChart3, Settings, LogOut, Menu, X, Bell, Calendar,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -11,7 +11,7 @@ const menuItems = [
   { to: '/products', icon: Package, label: 'Master Barang' },
   { to: '/customers', icon: Users, label: 'Customer' },
   { to: '/bookings', icon: CalendarDays, label: 'Booking' },
-  { to: '/keeps', icon: Bookmark, label: 'Keep' },
+  // { to: '/keeps', icon: Bookmark, label: 'Keep' },
   { to: '/payments', icon: CreditCard, label: 'Pembayaran' },
   { to: '/calendar', icon: Calendar, label: 'Kalender' },
   { to: '/reports', icon: BarChart3, label: 'Laporan' },

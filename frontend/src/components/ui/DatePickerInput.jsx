@@ -44,6 +44,7 @@ export default function DatePickerInput({
           onChange={(date) => onChange(date ? toInputDate(date) : '')}
           dateFormat="dd MMM yyyy"
           locale="id"
+          today={getToday()}
           placeholderText={placeholder}
           minDate={resolveMinDate(minDate, disablePast)}
           required={required}

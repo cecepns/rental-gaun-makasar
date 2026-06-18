@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Pencil, Plus, Bookmark } from 'lucide-react';
+import { ArrowLeft, Pencil, Plus } from 'lucide-react';
 import AdminLayout from '@/components/layout/AdminLayout';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import Badge from '@/components/ui/Badge';
@@ -56,9 +56,6 @@ export default function ProductDetail() {
               <div className="flex gap-2">
                 <button onClick={() => navigate('/bookings', { state: { productId: product.id } })} className="btn-primary text-xs">
                   <Plus className="h-4 w-4" /> Booking
-                </button>
-                <button onClick={() => navigate('/keeps', { state: { productId: product.id } })} className="btn-secondary text-xs">
-                  <Bookmark className="h-4 w-4" /> Keep
                 </button>
               </div>
             </div>

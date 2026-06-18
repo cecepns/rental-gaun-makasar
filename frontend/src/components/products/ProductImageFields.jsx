@@ -24,7 +24,7 @@ function ImagePreviewItem({ src, label, onRemove, removing }) {
   );
 }
 
-function UploadZone({ onSelect, multiple, label, hint, inputRef }) {
+function UploadZone({ onSelect, label, hint, inputRef }) {
   return (
     <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-6 transition hover:border-primary-400 hover:bg-primary-50/50">
       <ImagePlus className="mb-2 h-8 w-8 text-slate-400" />
@@ -34,7 +34,6 @@ function UploadZone({ onSelect, multiple, label, hint, inputRef }) {
         ref={inputRef}
         type="file"
         accept="image/*"
-        multiple={multiple}
         className="hidden"
         onChange={onSelect}
       />
@@ -44,103 +43,55 @@ function UploadZone({ onSelect, multiple, label, hint, inputRef }) {
 
 export default function ProductImageFields({
   existingMain,
-  existingGallery = [],
   pendingMain,
-  pendingGallery = [],
   onSelectMain,
-  onSelectGallery,
   onRemoveExistingMain,
-  onRemoveExistingGallery,
   onRemovePendingMain,
-  onRemovePendingGallery,
   removingMain = false,
-  removingGalleryId = null,
 }) {
   const mainInputRef = useRef(null);
-  const galleryInputRef = useRef(null);
-
   const hasMain = existingMain || pendingMain;
-  const totalGallery = existingGallery.length + pendingGallery.length;
 
   return (
-    <div className="sm:col-span-2 space-y-5">
-      <div>
-        <label className="label">Foto Utama</label>
-        {hasMain ? (
-          <div className="flex flex-col items-start gap-2">
-            {pendingMain && (
-              <ImagePreviewItem
-                src={pendingMain.preview}
-                label="Baru"
-                onRemove={onRemovePendingMain}
-              />
-            )}
-            {existingMain && !pendingMain && (
-              <ImagePreviewItem
-                src={getAssetUrl(existingMain)}
-                label="Utama"
-                onRemove={onRemoveExistingMain}
-                removing={removingMain}
-              />
-            )}
-            {existingMain && pendingMain && (
-              <p className="text-xs text-amber-600">Foto utama lama akan diganti saat disimpan</p>
-            )}
-            <button
-              type="button"
-              onClick={() => mainInputRef.current?.click()}
-              className="text-xs text-primary-600 hover:underline"
-            >
-              Ganti foto utama
-            </button>
-            <input ref={mainInputRef} type="file" accept="image/*" className="hidden" onChange={onSelectMain} />
-          </div>
-        ) : (
-          <UploadZone
-            inputRef={mainInputRef}
-            label="Upload foto utama"
-            hint="JPG, PNG, WEBP — maks 5MB"
-            onSelect={onSelectMain}
-          />
-        )}
-      </div>
-
-      <div>
-        <div className="mb-2 flex items-center justify-between">
-          <label className="label mb-0">Galeri Foto</label>
-          <span className="text-xs text-slate-400">{totalGallery} foto</span>
+    <div className="sm:col-span-2">
+      <label className="label">Foto Utama</label>
+      {hasMain ? (
+        <div className="flex flex-col items-start gap-2">
+          {pendingMain && (
+            <ImagePreviewItem
+              src={pendingMain.preview}
+              label="Baru"
+              onRemove={onRemovePendingMain}
+            />
+          )}
+          {existingMain && !pendingMain && (
+            <ImagePreviewItem
+              src={getAssetUrl(existingMain)}
+              label="Utama"
+              onRemove={onRemoveExistingMain}
+              removing={removingMain}
+            />
+          )}
+          {existingMain && pendingMain && (
+            <p className="text-xs text-amber-600">Foto utama lama akan diganti saat disimpan</p>
+          )}
+          <button
+            type="button"
+            onClick={() => mainInputRef.current?.click()}
+            className="text-xs text-primary-600 hover:underline"
+          >
+            Ganti foto utama
+          </button>
+          <input ref={mainInputRef} type="file" accept="image/*" className="hidden" onChange={onSelectMain} />
         </div>
-
-        {totalGallery > 0 && (
-          <div className="mb-3 flex flex-wrap gap-2">
-            {existingGallery.map((img) => (
-              <ImagePreviewItem
-                key={`db-${img.id}`}
-                src={getAssetUrl(img.url)}
-                label="Tersimpan"
-                onRemove={() => onRemoveExistingGallery(img)}
-                removing={removingGalleryId === img.id}
-              />
-            ))}
-            {pendingGallery.map((item) => (
-              <ImagePreviewItem
-                key={item.id}
-                src={item.preview}
-                label="Baru"
-                onRemove={() => onRemovePendingGallery(item.id)}
-              />
-            ))}
-          </div>
-        )}
-
+      ) : (
         <UploadZone
-          inputRef={galleryInputRef}
-          label="Tambah ke galeri"
-          hint="Bisa pilih beberapa foto sekaligus"
-          multiple
-          onSelect={onSelectGallery}
+          inputRef={mainInputRef}
+          label="Upload foto utama"
+          hint="JPG, PNG, WEBP — maks 5MB"
+          onSelect={onSelectMain}
         />
-      </div>
+      )}
     </div>
   );
 }

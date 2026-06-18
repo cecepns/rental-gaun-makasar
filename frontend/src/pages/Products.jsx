@@ -16,10 +16,7 @@ import { getErrorMessage, getAssetUrl, formatCurrency } from '@/utils/helpers';
 
 const emptyForm = { code: '', name: '', category_id: '', description: '', rent_price: '', deposit: '', stock: '1', is_active: true };
 
-const emptyImages = { existingMain: null, existingGallery: [], pendingMain: null, pendingGallery: [] };
-
-let previewId = 0;
-const nextPreviewId = () => `preview-${++previewId}`;
+const emptyImages = { existingMain: null, pendingMain: null };
 
 export default function Products() {
   const [items, setItems] = useState([]);
@@ -36,13 +33,11 @@ export default function Products() {
   const [images, setImages] = useState(emptyImages);
   const [loadingImages, setLoadingImages] = useState(false);
   const [removingMain, setRemovingMain] = useState(false);
-  const [removingGalleryId, setRemovingGalleryId] = useState(null);
   const [saving, setSaving] = useState(false);
   const debouncedSearch = useDebounce(search);
 
   const resetImages = () => {
     if (images.pendingMain?.preview) URL.revokeObjectURL(images.pendingMain.preview);
-    images.pendingGallery.forEach((g) => URL.revokeObjectURL(g.preview));
     setImages(emptyImages);
   };
 
@@ -61,7 +56,6 @@ export default function Products() {
 
   useEffect(() => () => {
     if (images.pendingMain?.preview) URL.revokeObjectURL(images.pendingMain.preview);
-    images.pendingGallery.forEach((g) => URL.revokeObjectURL(g.preview));
   }, []);
 
   const loadProductImages = async (productId) => {
@@ -71,9 +65,7 @@ export default function Products() {
       if (res.success) {
         setImages({
           existingMain: res.data.main_image || null,
-          existingGallery: res.data.images || [],
           pendingMain: null,
-          pendingGallery: [],
         });
       }
     } finally { setLoadingImages(false); }
@@ -111,33 +103,10 @@ export default function Products() {
     });
   };
 
-  const handleSelectGallery = (e) => {
-    const files = [...(e.target.files || [])];
-    e.target.value = '';
-    if (!files.length) return;
-    const valid = files.filter((f) => f.type.startsWith('image/') && f.size <= 5 * 1024 * 1024);
-    if (valid.length < files.length) toast.error('Beberapa file dilewati (bukan gambar atau >5MB)');
-    setImages((prev) => ({
-      ...prev,
-      pendingGallery: [
-        ...prev.pendingGallery,
-        ...valid.map((file) => ({ id: nextPreviewId(), file, preview: URL.createObjectURL(file) })),
-      ],
-    }));
-  };
-
   const handleRemovePendingMain = () => {
     setImages((prev) => {
       if (prev.pendingMain?.preview) URL.revokeObjectURL(prev.pendingMain.preview);
       return { ...prev, pendingMain: null };
-    });
-  };
-
-  const handleRemovePendingGallery = (id) => {
-    setImages((prev) => {
-      const target = prev.pendingGallery.find((g) => g.id === id);
-      if (target?.preview) URL.revokeObjectURL(target.preview);
-      return { ...prev, pendingGallery: prev.pendingGallery.filter((g) => g.id !== id) };
     });
   };
 
@@ -159,29 +128,6 @@ export default function Products() {
               fetchData();
             } catch (err) { toast.error(getErrorMessage(err)); }
             finally { setRemovingMain(false); toast.dismiss(t.id); }
-          }}>Hapus</button>
-          <button className="btn-secondary text-xs px-3 py-1" onClick={() => toast.dismiss(t.id)}>Batal</button>
-        </div>
-      </div>
-    ), { duration: 10000 });
-  };
-
-  const handleRemoveExistingGallery = (img) => {
-    toast((t) => (
-      <div>
-        <p className="font-medium">Hapus foto dari galeri?</p>
-        <div className="mt-2 flex gap-2">
-          <button className="btn-danger text-xs px-3 py-1" onClick={async () => {
-            setRemovingGalleryId(img.id);
-            try {
-              await del(API_ENDPOINTS.PRODUCTS.GALLERY_IMAGE(editItem.id, img.id));
-              setImages((prev) => ({
-                ...prev,
-                existingGallery: prev.existingGallery.filter((g) => g.id !== img.id),
-              }));
-              toast.success('Foto galeri dihapus');
-            } catch (err) { toast.error(getErrorMessage(err)); }
-            finally { setRemovingGalleryId(null); toast.dismiss(t.id); }
           }}>Hapus</button>
           <button className="btn-secondary text-xs px-3 py-1" onClick={() => toast.dismiss(t.id)}>Batal</button>
         </div>
@@ -215,7 +161,6 @@ export default function Products() {
       const fd = new FormData();
       Object.entries(form).forEach(([k, v]) => fd.append(k, v));
       if (images.pendingMain?.file) fd.append('main_image', images.pendingMain.file);
-      images.pendingGallery.forEach((g) => fd.append('gallery', g.file));
       if (editItem) await upload(API_ENDPOINTS.PRODUCTS.DETAIL(editItem.id), fd, 'put');
       else await upload(API_ENDPOINTS.PRODUCTS.LIST, fd);
       toast.success(editItem ? 'Barang diperbarui' : 'Barang ditambahkan');
@@ -229,7 +174,7 @@ export default function Products() {
     <AdminLayout title="Master Barang">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-1 gap-3">
-          <div className="flex-1 max-w-sm"><SearchInput value={search} onChange={setSearch} placeholder="Cari nama atau kode..." /></div>
+          <div className="flex-1 max-w-sm"><SearchInput value={search} onChange={setSearch} placeholder="Cari warna atau kode..." /></div>
           <select className="input w-auto" value={categoryFilter} onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}>
             <option value="">Semua Kategori</option>
             {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -245,7 +190,7 @@ export default function Products() {
               <thead className="bg-slate-50 text-left text-slate-500">
                 <tr>
                   <th className="px-4 py-3">Kode</th>
-                  <th className="px-4 py-3">Nama</th>
+                  <th className="px-4 py-3">Warna</th>
                   <th className="px-4 py-3">Kategori</th>
                   <th className="px-4 py-3">Harga</th>
                   <th className="px-4 py-3">Stok</th>
@@ -292,7 +237,7 @@ export default function Products() {
       <Modal open={modalOpen} onClose={closeModal} title={editItem ? 'Edit Barang' : 'Tambah Barang'} size="lg">
         <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
           <div><label className="label">Kode Barang</label><input className="input" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} required /></div>
-          <div><label className="label">Nama Barang</label><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></div>
+          <div><label className="label">Warna Barang</label><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></div>
           <div><label className="label">Kategori</label>
             <select className="input" value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })} required>
               <option value="">Pilih kategori</option>
@@ -309,17 +254,11 @@ export default function Products() {
           ) : (
             <ProductImageFields
               existingMain={images.existingMain}
-              existingGallery={images.existingGallery}
               pendingMain={images.pendingMain}
-              pendingGallery={images.pendingGallery}
               onSelectMain={handleSelectMain}
-              onSelectGallery={handleSelectGallery}
               onRemoveExistingMain={handleRemoveExistingMain}
-              onRemoveExistingGallery={handleRemoveExistingGallery}
               onRemovePendingMain={handleRemovePendingMain}
-              onRemovePendingGallery={handleRemovePendingGallery}
               removingMain={removingMain}
-              removingGalleryId={removingGalleryId}
             />
           )}
 

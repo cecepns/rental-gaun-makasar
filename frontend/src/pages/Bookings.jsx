@@ -10,6 +10,7 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
 import Badge from '@/components/ui/Badge';
 import ProductSelect, { formatProductOption } from '@/components/ui/ProductSelect';
+import CustomerSelect from '@/components/ui/CustomerSelect';
 import DatePickerInput from '@/components/ui/DatePickerInput';
 import { useDebounce } from '@/hooks/useDebounce';
 import { get, post, put } from '@/utils/request';
@@ -31,7 +32,6 @@ const emptyForm = {
 export default function Bookings() {
   const location = useLocation();
   const [items, setItems] = useState([]);
-  const [customers, setCustomers] = useState([]);
   const [pagination, setPagination] = useState(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -44,6 +44,7 @@ export default function Bookings() {
   const [form, setForm] = useState(emptyForm);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedProductOption, setSelectedProductOption] = useState(null);
+  const [selectedCustomerOption, setSelectedCustomerOption] = useState(null);
   const debouncedSearch = useDebounce(search);
 
   const fetchData = useCallback(async () => {
@@ -55,14 +56,12 @@ export default function Bookings() {
   }, [page, limit, debouncedSearch, statusFilter]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  useEffect(() => {
-    get(API_ENDPOINTS.CUSTOMERS.LIST, { limit: 100 }).then((r) => r.success && setCustomers(r.data));
-  }, []);
 
   const resetForm = () => {
     setForm(emptyForm);
     setSelectedProduct(null);
     setSelectedProductOption(null);
+    setSelectedCustomerOption(null);
     setAvailability(null);
   };
 
@@ -115,12 +114,16 @@ export default function Bookings() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!form.customer_id) {
+      toast.error('Pilih customer terlebih dahulu');
+      return;
+    }
     if (!form.product_id) {
       toast.error('Pilih barang terlebih dahulu');
       return;
     }
     if (availability && !availability.available) {
-      toast.error(availability.reason || 'Barang tidak tersedia');
+      toast.error('Gaun itu sudah terbooking. Silakan ubah tanggal atau kode gaun.');
       return;
     }
     setSaving(true);
@@ -222,26 +225,29 @@ export default function Bookings() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="label">Customer</label>
-              <select className="input" value={form.customer_id} onChange={(e) => setForm({ ...form, customer_id: e.target.value })} required>
-                <option value="">Pilih customer</option>
-                {customers.map((c) => <option key={c.id} value={c.id}>{c.name} - {c.phone}</option>)}
-              </select>
+              <CustomerSelect
+                value={selectedCustomerOption}
+                onChange={(option) => {
+                  setSelectedCustomerOption(option);
+                  setForm({ ...form, customer_id: option ? String(option.value) : '' });
+                }}
+              />
             </div>
             <div>
               <label className="label">Barang</label>
               <ProductSelect value={selectedProductOption} onChange={handleProductChange} />
             </div>
             <DatePickerInput
-              label="Tanggal Acara"
-              value={form.event_date}
-              onChange={(event_date) => setForm({ ...form, event_date })}
+              label="Tanggal Ambil"
+              value={form.pickup_date}
+              onChange={(pickup_date) => setForm({ ...form, pickup_date, return_date: form.return_date && form.return_date < pickup_date ? pickup_date : form.return_date })}
               disablePast
               required
             />
             <DatePickerInput
-              label="Tanggal Ambil"
-              value={form.pickup_date}
-              onChange={(pickup_date) => setForm({ ...form, pickup_date, return_date: form.return_date && form.return_date < pickup_date ? pickup_date : form.return_date })}
+              label="Tanggal Acara"
+              value={form.event_date}
+              onChange={(event_date) => setForm({ ...form, event_date })}
               disablePast
               required
             />
@@ -285,7 +291,9 @@ export default function Bookings() {
 
           {availability && (
             <div className={`rounded-lg p-3 text-sm ${availability.available ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-              {availability.available ? `✓ Tersedia (sisa ${availability.remaining} unit)` : `✗ ${availability.reason}`}
+              {availability.available
+                ? `✓ Tersedia (sisa ${availability.remaining} unit)`
+                : '✗ Gaun itu sudah terbooking. Silakan ubah tanggal atau kode gaun.'}
             </div>
           )}
 

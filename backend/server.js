@@ -148,7 +148,7 @@ const checkProductAvailability = async (productId, pickupDate, returnDate, exclu
     stock: product.stock,
     used,
     remaining: Math.max(0, product.stock - used),
-    reason: available ? null : 'Barang sudah dibooking pada tanggal tersebut. Silahkan pilih tanggal lain.',
+    reason: available ? null : 'Gaun itu sudah terbooking. Silakan ubah tanggal atau kode gaun.',
   };
 };
 
@@ -533,7 +533,8 @@ app.post('/api/customers', authMiddleware, async (req, res) => {
       [name, phone, address || null, instagram || null, facebook || null, notes || null, status || 'BARU']
     );
     await logActivity(req.user.id, 'CREATE', 'customer', r.insertId);
-    ok(res, { id: r.insertId });
+    const [[customer]] = await pool.execute('SELECT * FROM customers WHERE id = ?', [r.insertId]);
+    ok(res, customer);
   } catch (e) { fail(res, e.message, 500); }
 });
 
@@ -843,7 +844,7 @@ app.get('/api/calendar', authMiddleware, async (req, res) => {
     const dateStart = start || toDateStr(new Date());
     const dateEnd = end || toDateStr(new Date(new Date().setMonth(new Date().getMonth() + 1)));
     let bookingSql = `SELECT b.id, b.booking_number, b.status, b.event_date, b.pickup_date, b.return_date,
-      c.name as customer_name, p.name as product_name, p.id as product_id, 'booking' as type
+      c.name as customer_name, p.name as product_name, p.code as product_code, p.id as product_id, 'booking' as type
       FROM bookings b JOIN customers c ON c.id = b.customer_id
       JOIN booking_items bi ON bi.booking_id = b.id JOIN products p ON p.id = bi.product_id
       WHERE b.status NOT IN ('BATAL') AND b.pickup_date <= ? AND b.return_date >= ?`;
@@ -851,7 +852,7 @@ app.get('/api/calendar', authMiddleware, async (req, res) => {
     if (product_id) { bookingSql += ' AND bi.product_id = ?'; params.push(product_id); }
     const [bookings] = await pool.execute(bookingSql, params);
     let keepSql = `SELECT k.id, k.status, k.start_date, k.end_date, c.name as customer_name,
-      p.name as product_name, p.id as product_id, 'keep' as type
+      p.name as product_name, p.code as product_code, p.id as product_id, 'keep' as type
       FROM keeps k JOIN customers c ON c.id = k.customer_id JOIN products p ON p.id = k.product_id
       WHERE k.status = 'KEEP' AND k.expired_at > NOW() AND k.start_date <= ? AND k.end_date >= ?`;
     const keepParams = [dateEnd, dateStart];
