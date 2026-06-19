@@ -9,6 +9,8 @@ import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
 import ProductImageFields from '@/components/products/ProductImageFields';
+import CategorySelect from '@/components/ui/CategorySelect';
+import CategoryManageModal from '@/components/products/CategoryManageModal';
 import { useDebounce } from '@/hooks/useDebounce';
 import { get, del, upload } from '@/utils/request';
 import { API_ENDPOINTS } from '@/utils/endpoints';
@@ -34,7 +36,12 @@ export default function Products() {
   const [loadingImages, setLoadingImages] = useState(false);
   const [removingMain, setRemovingMain] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const debouncedSearch = useDebounce(search);
+
+  const fetchCategories = useCallback(() => {
+    get(API_ENDPOINTS.CATEGORIES.ALL).then((res) => res.success && setCategories(res.data));
+  }, []);
 
   const resetImages = () => {
     if (images.pendingMain?.preview) URL.revokeObjectURL(images.pendingMain.preview);
@@ -50,9 +57,7 @@ export default function Products() {
   }, [page, limit, debouncedSearch, categoryFilter]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  useEffect(() => {
-    get(API_ENDPOINTS.CATEGORIES.ALL).then((res) => res.success && setCategories(res.data));
-  }, []);
+  useEffect(() => { fetchCategories(); }, [fetchCategories]);
 
   useEffect(() => () => {
     if (images.pendingMain?.preview) URL.revokeObjectURL(images.pendingMain.preview);
@@ -156,6 +161,7 @@ export default function Products() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!form.category_id) return toast.error('Pilih kategori terlebih dahulu');
     setSaving(true);
     try {
       const fd = new FormData();
@@ -175,10 +181,15 @@ export default function Products() {
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-1 gap-3">
           <div className="flex-1 max-w-sm"><SearchInput value={search} onChange={setSearch} placeholder="Cari warna atau kode..." /></div>
-          <select className="input w-auto" value={categoryFilter} onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}>
-            <option value="">Semua Kategori</option>
-            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <div className="w-full max-w-xs sm:max-w-[220px]">
+            <CategorySelect
+              categories={categories}
+              value={categoryFilter}
+              onChange={(val) => { setCategoryFilter(val); setPage(1); }}
+              allowAll
+              onManage={() => setCategoryModalOpen(true)}
+            />
+          </div>
         </div>
         <button onClick={openCreate} className="btn-primary"><Plus className="h-4 w-4" /> Tambah Barang</button>
       </div>
@@ -238,11 +249,14 @@ export default function Products() {
         <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
           <div><label className="label">Kode Barang</label><input className="input" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} required /></div>
           <div><label className="label">Warna Barang</label><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></div>
-          <div><label className="label">Kategori</label>
-            <select className="input" value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })} required>
-              <option value="">Pilih kategori</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+          <div className="sm:col-span-2">
+            <label className="label">Kategori</label>
+            <CategorySelect
+              categories={categories}
+              value={form.category_id}
+              onChange={(val) => setForm({ ...form, category_id: val })}
+              onManage={() => setCategoryModalOpen(true)}
+            />
           </div>
           <div><label className="label">Harga Sewa</label><input type="number" className="input" value={form.rent_price} onChange={(e) => setForm({ ...form, rent_price: e.target.value })} required /></div>
           <div><label className="label">Deposit</label><input type="number" className="input" value={form.deposit} onChange={(e) => setForm({ ...form, deposit: e.target.value })} /></div>
@@ -272,6 +286,12 @@ export default function Products() {
           </div>
         </form>
       </Modal>
+
+      <CategoryManageModal
+        open={categoryModalOpen}
+        onClose={() => setCategoryModalOpen(false)}
+        onUpdated={fetchCategories}
+      />
     </AdminLayout>
   );
 }

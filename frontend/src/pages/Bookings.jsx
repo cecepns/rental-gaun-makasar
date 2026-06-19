@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { Plus, Eye, XCircle, Pencil, Trash2 } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Plus, Eye, XCircle, Pencil, Trash2, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import AdminLayout from '@/components/layout/AdminLayout';
 import SearchInput from '@/components/ui/SearchInput';
@@ -19,6 +19,7 @@ import { formatCurrency, formatDate, BOOKING_STATUS, getErrorMessage, getAssetUr
 
 const emptyForm = {
   customer_id: '',
+  customer_phone: '',
   product_id: '',
   event_date: '',
   pickup_date: '',
@@ -33,6 +34,7 @@ const toDateValue = (value) => (value ? String(value).split('T')[0] : '');
 
 export default function Bookings() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [pagination, setPagination] = useState(null);
   const [search, setSearch] = useState('');
@@ -49,6 +51,7 @@ export default function Bookings() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedProductOption, setSelectedProductOption] = useState(null);
   const [selectedCustomerOption, setSelectedCustomerOption] = useState(null);
+  const [successBooking, setSuccessBooking] = useState(null);
   const debouncedSearch = useDebounce(search);
 
   const fetchData = useCallback(async () => {
@@ -68,6 +71,7 @@ export default function Bookings() {
     setSelectedProductOption(null);
     setSelectedCustomerOption(null);
     setAvailability(null);
+    setSuccessBooking(null);
   };
 
   const openCreateModal = () => {
@@ -104,6 +108,7 @@ export default function Bookings() {
       setEditItem(booking);
       setForm({
         customer_id: String(booking.customer_id),
+        customer_phone: booking.customer_phone && booking.customer_phone !== '-' ? booking.customer_phone : '',
         product_id: firstItem ? String(firstItem.product_id) : '',
         event_date: toDateValue(booking.event_date),
         pickup_date: toDateValue(booking.pickup_date),
@@ -187,12 +192,26 @@ export default function Bookings() {
       if (editItem) {
         await put(API_ENDPOINTS.BOOKINGS.DETAIL(editItem.id), payload);
         toast.success('Booking berhasil diperbarui');
+        closeModal();
+        fetchData();
       } else {
-        await post(API_ENDPOINTS.BOOKINGS.LIST, payload);
-        toast.success('Booking berhasil dibuat');
+        const res = await post(API_ENDPOINTS.BOOKINGS.LIST, payload);
+        const total = Number(selectedProduct.rent_price) + Number(form.deposit || selectedProduct?.deposit || 0);
+        setSuccessBooking({
+          id: res.data?.id,
+          booking_number: res.data?.booking_number,
+          customer_name: selectedCustomerOption?.customer?.name || '-',
+          customer_phone: form.customer_phone || selectedCustomerOption?.customer?.phone || '-',
+          product_name: selectedProduct?.name,
+          product_code: selectedProduct?.code,
+          event_date: form.event_date,
+          pickup_date: form.pickup_date,
+          return_date: form.return_date,
+          total,
+          dp_amount: Number(form.dp_amount) || 0,
+        });
+        fetchData();
       }
-      closeModal();
-      fetchData();
     } catch (err) { toast.error(getErrorMessage(err)); }
     finally { setSaving(false); }
   };
@@ -232,6 +251,11 @@ export default function Bookings() {
         </div>
       </div>
     ), { duration: 10000 });
+  };
+
+  const handleCloseSuccess = () => {
+    setSuccessBooking(null);
+    closeModal();
   };
 
   const canEdit = (item) => !['BATAL', 'SELESAI', 'SEDANG_DISEWA'].includes(item.status);
@@ -301,8 +325,48 @@ export default function Bookings() {
         </div>
       )}
 
-      <Modal open={modalOpen} onClose={closeModal} title={editItem ? 'Edit Booking' : 'Buat Booking'} size="lg">
-        {loadingEdit ? (
+      <Modal
+        open={modalOpen}
+        onClose={successBooking ? handleCloseSuccess : closeModal}
+        title={successBooking ? 'Booking Berhasil' : editItem ? 'Edit Booking' : 'Buat Booking'}
+        size="lg"
+      >
+        {successBooking ? (
+          <div className="space-y-5 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+              <CheckCircle2 className="h-9 w-9 text-green-600" />
+            </div>
+            <div>
+              <p className="text-lg font-semibold text-slate-800">Booking berhasil dibuat!</p>
+              <p className="mt-1 font-mono text-sm text-primary-600">{successBooking.booking_number}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-left text-sm space-y-2">
+              <div className="flex justify-between gap-4"><span className="text-slate-500">Customer</span><span className="font-medium text-right">{successBooking.customer_name}</span></div>
+              {successBooking.customer_phone && successBooking.customer_phone !== '-' && (
+                <div className="flex justify-between gap-4"><span className="text-slate-500">No. HP</span><span className="font-medium">{successBooking.customer_phone}</span></div>
+              )}
+              <div className="flex justify-between gap-4"><span className="text-slate-500">Barang</span><span className="font-medium text-right">{successBooking.product_code} - {successBooking.product_name}</span></div>
+              <div className="flex justify-between gap-4"><span className="text-slate-500">Tgl Ambil</span><span className="font-medium">{formatDate(successBooking.pickup_date)}</span></div>
+              <div className="flex justify-between gap-4"><span className="text-slate-500">Tgl Acara</span><span className="font-medium">{formatDate(successBooking.event_date)}</span></div>
+              <div className="flex justify-between gap-4"><span className="text-slate-500">Tgl Kembali</span><span className="font-medium">{formatDate(successBooking.return_date)}</span></div>
+              {successBooking.dp_amount > 0 && (
+                <div className="flex justify-between gap-4"><span className="text-slate-500">DP</span><span className="font-medium text-green-600">{formatCurrency(successBooking.dp_amount)}</span></div>
+              )}
+              <div className="flex justify-between gap-4 border-t border-slate-200 pt-2"><span className="font-medium">Total</span><span className="font-bold text-primary-700">{formatCurrency(successBooking.total)}</span></div>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
+              <button type="button" onClick={handleCloseSuccess} className="btn-secondary">Tutup</button>
+              {successBooking.id && (
+                <button type="button" onClick={() => { handleCloseSuccess(); navigate(`/bookings/${successBooking.id}`); }} className="btn-primary">
+                  Lihat Detail
+                </button>
+              )}
+              <button type="button" onClick={() => { setSuccessBooking(null); resetForm(); }} className="btn-secondary">
+                Buat Booking Lagi
+              </button>
+            </div>
+          </div>
+        ) : loadingEdit ? (
           <LoadingSpinner className="py-12" />
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -313,8 +377,23 @@ export default function Bookings() {
                   value={selectedCustomerOption}
                   onChange={(option) => {
                     setSelectedCustomerOption(option);
-                    setForm({ ...form, customer_id: option ? String(option.value) : '' });
+                    const phone = option?.customer?.phone;
+                    setForm({
+                      ...form,
+                      customer_id: option ? String(option.value) : '',
+                      customer_phone: phone && phone !== '-' ? phone : '',
+                    });
                   }}
+                />
+              </div>
+              <div>
+                <label className="label">No. HP Customer (opsional)</label>
+                <input
+                  type="tel"
+                  className="input"
+                  placeholder="08xxxxxxxxxx"
+                  value={form.customer_phone}
+                  onChange={(e) => setForm({ ...form, customer_phone: e.target.value })}
                 />
               </div>
               <div>

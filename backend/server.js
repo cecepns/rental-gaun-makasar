@@ -547,10 +547,11 @@ app.get('/api/customers/:id', authMiddleware, async (req, res) => {
 app.post('/api/customers', authMiddleware, async (req, res) => {
   try {
     const { name, phone, address, instagram, facebook, notes, status } = req.body;
-    if (!name || !phone) return fail(res, 'Nama dan no HP wajib diisi');
+    if (!name?.trim()) return fail(res, 'Nama wajib diisi');
+    const phoneValue = phone?.trim() || '-';
     const [r] = await pool.execute(
       'INSERT INTO customers (name, phone, address, instagram, facebook, notes, status) VALUES (?,?,?,?,?,?,?)',
-      [name, phone, address || null, instagram || null, facebook || null, notes || null, status || 'BARU']
+      [name.trim(), phoneValue, address || null, instagram || null, facebook || null, notes || null, status || 'BARU']
     );
     await logActivity(req.user.id, 'CREATE', 'customer', r.insertId);
     const [[customer]] = await pool.execute('SELECT * FROM customers WHERE id = ?', [r.insertId]);

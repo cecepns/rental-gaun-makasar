@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import AsyncSelect from 'react-select/async';
 import { components } from 'react-select';
-import { Plus } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { get, post } from '@/utils/request';
 import { API_ENDPOINTS } from '@/utils/endpoints';
 import { getErrorMessage } from '@/utils/helpers';
@@ -9,7 +10,9 @@ import toast from 'react-hot-toast';
 
 export const formatCustomerOption = (customer) => ({
   value: customer.id,
-  label: `${customer.name} - ${customer.phone}`,
+  label: customer.phone && customer.phone !== '-'
+    ? `${customer.name} - ${customer.phone}`
+    : customer.name,
   customer,
 });
 
@@ -53,39 +56,44 @@ function CustomerOption(props) {
     <components.Option {...props}>
       <div className="py-0.5">
         <p className="text-sm font-medium text-slate-800">{customer.name}</p>
-        <p className="text-xs text-slate-500">{customer.phone}{customer.address ? ` · ${customer.address}` : ''}</p>
+        {customer.phone && customer.phone !== '-' && (
+          <p className="text-xs text-slate-500">
+            {customer.phone}{customer.address ? ` · ${customer.address}` : ''}
+          </p>
+        )}
       </div>
     </components.Option>
   );
 }
 
-export default function CustomerSelect({ value, onChange, onCustomerCreated }) {
-  const [showAddForm, setShowAddForm] = useState(false);
+function AddCustomerModal({ open, onClose, onCreated }) {
   const [newCustomer, setNewCustomer] = useState({ name: '', phone: '', address: '' });
   const [saving, setSaving] = useState(false);
 
+  const handleClose = () => {
+    setNewCustomer({ name: '', phone: '', address: '' });
+    onClose();
+  };
+
   const handleCreateCustomer = async (e) => {
     e.preventDefault();
-    if (!newCustomer.name.trim() || !newCustomer.phone.trim()) {
-      toast.error('Nama dan nomor HP wajib diisi');
+    if (!newCustomer.name.trim()) {
+      toast.error('Nama customer wajib diisi');
       return;
     }
     setSaving(true);
     try {
       const res = await post(API_ENDPOINTS.CUSTOMERS.LIST, {
         name: newCustomer.name.trim(),
-        phone: newCustomer.phone.trim(),
+        phone: newCustomer.phone.trim() || '-',
         address: newCustomer.address.trim() || null,
         status: 'BARU',
       });
       if (res.success) {
-        const created = res.data;
-        const option = formatCustomerOption(created);
-        onChange(option);
-        onCustomerCreated?.(created);
+        const option = formatCustomerOption(res.data);
+        onCreated?.(option, res.data);
         toast.success('Customer berhasil ditambahkan');
-        setShowAddForm(false);
-        setNewCustomer({ name: '', phone: '', address: '' });
+        handleClose();
       }
     } catch (err) {
       toast.error(getErrorMessage(err));
@@ -94,46 +102,75 @@ export default function CustomerSelect({ value, onChange, onCustomerCreated }) {
     }
   };
 
-  if (showAddForm) {
-    return (
-      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-3">
-        <p className="text-sm font-medium text-slate-700">Tambah Customer Baru</p>
-        <form onSubmit={handleCreateCustomer} className="space-y-2">
-          <input
-            className="input"
-            placeholder="Nama *"
-            value={newCustomer.name}
-            onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
-            required
-          />
-          <input
-            className="input"
-            placeholder="No. HP *"
-            value={newCustomer.phone}
-            onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
-            required
-          />
-          <input
-            className="input"
-            placeholder="Alamat (opsional)"
-            value={newCustomer.address}
-            onChange={(e) => setNewCustomer({ ...newCustomer, address: e.target.value })}
-          />
-          <div className="flex gap-2">
-            <button type="button" onClick={() => setShowAddForm(false)} className="btn-secondary text-xs flex-1">
-              Batal
-            </button>
-            <button type="submit" disabled={saving} className="btn-primary text-xs flex-1">
+  if (!open) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={handleClose} />
+      <div className="relative w-full max-w-md card overflow-hidden">
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <h3 className="text-lg font-semibold">Tambah Customer Baru</h3>
+          <button type="button" onClick={handleClose} className="rounded-lg p-1 hover:bg-slate-100">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <form onSubmit={handleCreateCustomer} className="space-y-3 p-5">
+          <div>
+            <label className="label">Nama *</label>
+            <input
+              className="input"
+              placeholder="Nama customer"
+              value={newCustomer.name}
+              onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
+              required
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="label">No. HP (opsional)</label>
+            <input
+              className="input"
+              type="tel"
+              placeholder="08xxxxxxxxxx"
+              value={newCustomer.phone}
+              onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="label">Alamat (opsional)</label>
+            <input
+              className="input"
+              placeholder="Alamat customer"
+              value={newCustomer.address}
+              onChange={(e) => setNewCustomer({ ...newCustomer, address: e.target.value })}
+            />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={handleClose} className="btn-secondary flex-1">Batal</button>
+            <button type="submit" disabled={saving} className="btn-primary flex-1">
               {saving ? 'Menyimpan...' : 'Simpan'}
             </button>
           </div>
         </form>
       </div>
-    );
-  }
+    </div>,
+    document.body,
+  );
+}
+
+export default function CustomerSelect({ value, onChange, onCustomerCreated }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [addModalOpen, setAddModalOpen] = useState(false);
+
+  const handleOpenAdd = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuOpen(false);
+    requestAnimationFrame(() => setAddModalOpen(true));
+  };
 
   return (
-    <div className="space-y-2">
+    <>
       <AsyncSelect
         cacheOptions
         defaultOptions
@@ -142,6 +179,10 @@ export default function CustomerSelect({ value, onChange, onCustomerCreated }) {
         onChange={onChange}
         placeholder="Cari nama atau nomor HP..."
         isClearable
+        menuIsOpen={menuOpen}
+        onMenuOpen={() => setMenuOpen(true)}
+        onMenuClose={() => setMenuOpen(false)}
+        blurInputOnSelect
         components={{
           Option: CustomerOption,
           MenuList: (props) => (
@@ -149,8 +190,9 @@ export default function CustomerSelect({ value, onChange, onCustomerCreated }) {
               <components.MenuList {...props} />
               <button
                 type="button"
-                onClick={() => setShowAddForm(true)}
-                className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-2.5 text-sm font-medium text-primary-600 hover:bg-primary-50"
+                onMouseDown={handleOpenAdd}
+                onTouchEnd={(e) => { e.preventDefault(); handleOpenAdd(e); }}
+                className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-3 text-sm font-medium text-primary-600 hover:bg-primary-50 active:bg-primary-50"
               >
                 <Plus className="h-4 w-4" /> Tambah Customer Baru
               </button>
@@ -163,6 +205,15 @@ export default function CustomerSelect({ value, onChange, onCustomerCreated }) {
         noOptionsMessage={({ inputValue }) => (inputValue ? 'Customer tidak ditemukan' : 'Ketik untuk mencari customer')}
         loadingMessage={() => 'Mencari customer...'}
       />
-    </div>
+
+      <AddCustomerModal
+        open={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        onCreated={(option, customer) => {
+          onChange(option);
+          onCustomerCreated?.(customer);
+        }}
+      />
+    </>
   );
 }
