@@ -8,6 +8,8 @@ import { API_ENDPOINTS } from '@/utils/endpoints';
 import { getErrorMessage } from '@/utils/helpers';
 import toast from 'react-hot-toast';
 
+const CUSTOMER_LIST_LIMIT = 4;
+
 export const formatCustomerOption = (customer) => ({
   value: customer.id,
   label: customer.phone && customer.phone !== '-'
@@ -20,7 +22,7 @@ export const loadCustomerOptions = async (inputValue) => {
   try {
     const res = await get(API_ENDPOINTS.CUSTOMERS.LIST, {
       search: inputValue || undefined,
-      limit: 20,
+      limit: CUSTOMER_LIST_LIMIT,
     });
     return res.success ? res.data.map(formatCustomerOption) : [];
   } catch {
@@ -159,18 +161,10 @@ function AddCustomerModal({ open, onClose, onCreated }) {
 }
 
 export default function CustomerSelect({ value, onChange, onCustomerCreated }) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const [addModalOpen, setAddModalOpen] = useState(false);
 
-  const handleOpenAdd = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setMenuOpen(false);
-    requestAnimationFrame(() => setAddModalOpen(true));
-  };
-
   return (
-    <>
+    <div className="space-y-2">
       <AsyncSelect
         cacheOptions
         defaultOptions
@@ -179,32 +173,22 @@ export default function CustomerSelect({ value, onChange, onCustomerCreated }) {
         onChange={onChange}
         placeholder="Cari nama atau nomor HP..."
         isClearable
-        menuIsOpen={menuOpen}
-        onMenuOpen={() => setMenuOpen(true)}
-        onMenuClose={() => setMenuOpen(false)}
-        blurInputOnSelect
-        components={{
-          Option: CustomerOption,
-          MenuList: (props) => (
-            <>
-              <components.MenuList {...props} />
-              <button
-                type="button"
-                onMouseDown={handleOpenAdd}
-                onTouchEnd={(e) => { e.preventDefault(); handleOpenAdd(e); }}
-                className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-3 text-sm font-medium text-primary-600 hover:bg-primary-50 active:bg-primary-50"
-              >
-                <Plus className="h-4 w-4" /> Tambah Customer Baru
-              </button>
-            </>
-          ),
-        }}
+        components={{ Option: CustomerOption }}
         styles={selectStyles}
+        maxMenuHeight={200}
         menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
         menuPosition="fixed"
         noOptionsMessage={({ inputValue }) => (inputValue ? 'Customer tidak ditemukan' : 'Ketik untuk mencari customer')}
         loadingMessage={() => 'Mencari customer...'}
       />
+
+      <button
+        type="button"
+        onClick={() => setAddModalOpen(true)}
+        className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-primary-200 bg-primary-50/50 px-3 py-2 text-sm font-medium text-primary-600 transition hover:border-primary-300 hover:bg-primary-50"
+      >
+        <Plus className="h-4 w-4" /> Tambah Customer Baru
+      </button>
 
       <AddCustomerModal
         open={addModalOpen}
@@ -214,6 +198,6 @@ export default function CustomerSelect({ value, onChange, onCustomerCreated }) {
           onCustomerCreated?.(customer);
         }}
       />
-    </>
+    </div>
   );
 }
