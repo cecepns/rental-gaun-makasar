@@ -47,6 +47,26 @@ const ok = (res, data, pagination = null) =>
 const fail = (res, message, status = 400) =>
   res.status(status).json({ success: false, message });
 
+const isDuplicateEntry = (err) => err?.code === 'ER_DUP_ENTRY' || err?.errno === 1062;
+
+const dbErrorMessage = (err, fallback = 'Terjadi kesalahan database') => {
+  if (isDuplicateEntry(err)) {
+    const msg = String(err.message || '');
+    if (msg.includes('code') || msg.includes("'code'")) return 'Kode barang sudah digunakan';
+    if (msg.includes('email') || msg.includes("'email'")) return 'Email sudah digunakan';
+    return 'Data sudah ada, tidak boleh duplikat';
+  }
+  return err?.message || fallback;
+};
+
+const assertUniqueProductCode = async (code, excludeId = null) => {
+  let sql = 'SELECT id FROM products WHERE code = ?';
+  const params = [String(code).trim()];
+  if (excludeId) { sql += ' AND id != ?'; params.push(excludeId); }
+  const [[existing]] = await pool.execute(sql, params);
+  if (existing) throw Object.assign(new Error('Kode barang sudah digunakan'), { statusCode: 400 });
+};
+
 const parsePagination = (query) => {
   const page = Math.max(1, parseInt(query.page) || 1);
   const limit = [10, 25, 50, 100].includes(parseInt(query.limit)) ? parseInt(query.limit) : 10;
@@ -256,6 +276,48 @@ app.get('/api/auth/profile', authMiddleware, async (req, res) => {
   } catch (e) { fail(res, e.message, 500); }
 });
 
+app.put('/api/auth/profile', authMiddleware, async (req, res) => {
+  try {
+    const { email, current_password, new_password } = req.body;
+    const [[user]] = await pool.execute('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    if (!user) return fail(res, 'User tidak ditemukan', 404);
+
+    if (!current_password) return fail(res, 'Password saat ini wajib diisi');
+
+    const valid = await bcrypt.compare(current_password, user.password);
+    if (!valid) return fail(res, 'Password saat ini salah');
+
+    const updates = [];
+    const params = [];
+
+    if (email !== undefined) {
+      const trimmedEmail = String(email).trim().toLowerCase();
+      if (!trimmedEmail) return fail(res, 'Email wajib diisi');
+      const [[dup]] = await pool.execute('SELECT id FROM users WHERE email = ? AND id != ?', [trimmedEmail, req.user.id]);
+      if (dup) return fail(res, 'Email sudah digunakan');
+      updates.push('email = ?');
+      params.push(trimmedEmail);
+    }
+
+    if (new_password !== undefined && String(new_password).length > 0) {
+      if (String(new_password).length < 6) return fail(res, 'Password baru minimal 6 karakter');
+      updates.push('password = ?');
+      params.push(await bcrypt.hash(String(new_password), 10));
+    }
+
+    if (!updates.length) return fail(res, 'Tidak ada data untuk diupdate');
+
+    params.push(req.user.id);
+    await pool.execute(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
+
+    const [[updated]] = await pool.execute('SELECT id, name, email, role, created_at FROM users WHERE id = ?', [req.user.id]);
+    await logActivity(req.user.id, 'UPDATE', 'user', req.user.id);
+    ok(res, updated);
+  } catch (e) {
+    fail(res, isDuplicateEntry(e) ? 'Email sudah digunakan' : e.message, isDuplicateEntry(e) ? 400 : 500);
+  }
+});
+
 // ===================== DASHBOARD =====================
 app.get('/api/dashboard', authMiddleware, async (req, res) => {
   try {
@@ -436,6 +498,7 @@ app.post('/api/products', authMiddleware, upload.fields([{ name: 'main_image', m
   try {
     const { code, name, category_id, description, rent_price, deposit, stock, is_active } = req.body;
     if (!code || !name || !category_id || !rent_price) return fail(res, 'Kode, nama, kategori, dan harga wajib diisi');
+    await assertUniqueProductCode(code);
     const mainImage = req.files?.main_image?.[0] ? `/uploads/${req.files.main_image[0].filename}` : null;
     const [r] = await pool.execute(
       `INSERT INTO products (code, name, category_id, description, rent_price, deposit, stock, main_image, is_active)
@@ -450,12 +513,14 @@ app.post('/api/products', authMiddleware, upload.fields([{ name: 'main_image', m
     }
     await logActivity(req.user.id, 'CREATE', 'product', productId);
     ok(res, { id: productId });
-  } catch (e) { fail(res, e.message, 500); }
+  } catch (e) { fail(res, dbErrorMessage(e), e.statusCode || (isDuplicateEntry(e) ? 400 : 500)); }
 });
 
 app.put('/api/products/:id', authMiddleware, upload.fields([{ name: 'main_image', maxCount: 1 }, { name: 'gallery', maxCount: 10 }]), async (req, res) => {
   try {
     const { code, name, category_id, description, rent_price, deposit, stock, is_active } = req.body;
+    if (!code || !name || !category_id || !rent_price) return fail(res, 'Kode, nama, kategori, dan harga wajib diisi');
+    await assertUniqueProductCode(code, req.params.id);
     const mainImage = req.files?.main_image?.[0] ? `/uploads/${req.files.main_image[0].filename}` : undefined;
     if (mainImage) {
       const [[old]] = await pool.execute('SELECT main_image FROM products WHERE id = ?', [req.params.id]);
@@ -473,7 +538,7 @@ app.put('/api/products/:id', authMiddleware, upload.fields([{ name: 'main_image'
     }
     await logActivity(req.user.id, 'UPDATE', 'product', req.params.id);
     ok(res, { id: Number(req.params.id) });
-  } catch (e) { fail(res, e.message, 500); }
+  } catch (e) { fail(res, dbErrorMessage(e), e.statusCode || (isDuplicateEntry(e) ? 400 : 500)); }
 });
 
 app.delete('/api/products/:id/main-image', authMiddleware, async (req, res) => {

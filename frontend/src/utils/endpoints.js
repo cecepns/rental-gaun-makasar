@@ -7,6 +7,7 @@ export const API_ENDPOINTS = {
   AUTH: {
     LOGIN: '/auth/login',
     PROFILE: '/auth/profile',
+    UPDATE_PROFILE: '/auth/profile',
   },
   DASHBOARD: '/dashboard',
   CATEGORIES: {
